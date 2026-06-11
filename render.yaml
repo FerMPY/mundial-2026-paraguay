@@ -1,0 +1,13 @@
+# Blueprint de Render (plan free). En Render: New → Blueprint → conectar este repo.
+services:
+  - type: web
+    name: mundial-2026-paraguay
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.mjs
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
