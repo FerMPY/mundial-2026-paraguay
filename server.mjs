@@ -99,9 +99,20 @@ async function fifaScores() {
   return out
 }
 
+// la agenda se lee fresca del disco: editás matches.json y la página se
+// actualiza sola en el próximo poll, sin rebuild ni reinicio
+let mc = { t: 0, v: null }
+async function matchesJson() {
+  if (Date.now() - mc.t < 5_000 && mc.v) return mc.v
+  try {
+    mc = { t: Date.now(), v: JSON.parse(await readFile(join(fileURLToPath(new URL('.', import.meta.url)), 'matches.json'), 'utf8')) }
+  } catch { mc = { t: Date.now(), v: null } }
+  return mc.v
+}
+
 async function apiData() {
-  const [gen, vs, scores] = await Promise.all([genVideos(), vsVideos(), fifaScores()])
-  return { videos: { gen, vs }, scores, fetched: Math.floor(Date.now() / 1000) }
+  const [gen, vs, scores, matches] = await Promise.all([genVideos(), vsVideos(), fifaScores(), matchesJson()])
+  return { videos: { gen, vs }, scores, matches, fetched: Math.floor(Date.now() / 1000) }
 }
 
 http.createServer(async (req, res) => {

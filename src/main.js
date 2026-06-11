@@ -53,6 +53,10 @@ async function fetchData() {
     const d = await (await fetch('/api/data')).json()
     if (d.videos) API.videos = d.videos
     if (d.scores) API.scores = d.scores
+    if (Array.isArray(d.matches) && d.matches.length && JSON.stringify(d.matches) !== JSON.stringify(M)) {
+      M.length = 0; M.push(...d.matches) // matches.json editado → agenda fresca sin rebuild
+      rebuildByMk()
+    }
     rebuildIdx()
     render(activeFilter); nowTick()
     if (document.body.classList.contains('watching') && thMatch) { // refrescar marcador en la barra
@@ -207,7 +211,9 @@ function chLinks(m) {
     return `<button class="ch-link" style="--ch-color:${c.color}" data-ch="${k}" data-mk="${mKey(m)}" title="Ver ${c.name} acá mismo"><i></i>${c.name}<span class="play">▶</span></button>`
   }).join('')
 }
-const byMk = {}; for (const m of M) byMk[mKey(m)] = m
+const byMk = {}
+function rebuildByMk() { for (const k in byMk) delete byMk[k]; for (const m of M) byMk[mKey(m)] = m }
+rebuildByMk()
 document.addEventListener('click', e => {
   const b = e.target.closest('button.ch-link, button[data-ver]')
   if (b) openTheater(b.dataset.ch, byMk[b.dataset.mk] || null)
