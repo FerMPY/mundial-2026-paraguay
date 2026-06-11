@@ -31,6 +31,9 @@
   <button class="watch-back" id="watchBack">← Volver</button>
 </div>
 
+<!-- barra "ahora en vivo / próximo partido" (saltar al partido) -->
+<div class="now-strip hide-when-watching" id="nowStrip"></div>
+
 <!-- próximo partido de la albirroja -->
 <section class="hero hide-when-watching" id="hero" hidden>
   <div class="hero-inner">
@@ -75,6 +78,7 @@
 </div>
 <nav class="filters hide-when-watching" id="filters" aria-label="Filtros">
   <button class="chip on" data-f="all">Todos</button>
+  <button class="chip" data-f="live">🔴 En vivo</button>
   <button class="chip" data-f="today">Hoy</button>
   <button class="chip py-chip" data-f="py">🇵🇾 Albirroja</button>
   <button class="chip" data-f="f1">Fecha 1</button>
@@ -85,11 +89,7 @@
 <p class="empty hide-when-watching" id="empty">No hay partidos para este filtro.</p>
 
 <footer class="hide-when-watching">
-  <div class="tigo-note">
-    <span class="t">📺 ¿Querés ver los 104 partidos?</span>
-    <span>Tigo Sports transmite el Mundial completo por su app (servicio pago) — <a href="https://www.tigosports.com.py/" target="_blank" rel="noopener">tigosports.com.py</a></span>
-  </div>
-  <p style="margin-top:18px">Horarios en hora de Paraguay (America/Asuncion). Grilla según la programación anunciada para la fase de grupos; los canales pueden modificarla sin aviso — ante la duda, entrá igual a la señal.</p>
+  <p>Marcadores y minuto en vivo vía la API pública de la FIFA; los videos por partido salen de los canales de YouTube de GEN y VS Sports. Horarios en hora de Paraguay (America/Asuncion). La grilla puede cambiar sin aviso — ante la duda, entrá igual a la señal.</p>
   <p>Fuente de la grilla: infografías de <a href="https://www.instagram.com/puntaje_ideal/" target="_blank" rel="noopener">@puntaje_ideal</a> y <a href="https://www.instagram.com/futbolenlatv/" target="_blank" rel="noopener">@futbolenlatv</a>. Esta página solo enlaza a las transmisiones oficiales de cada canal.</p>
 </footer>
 </div>
