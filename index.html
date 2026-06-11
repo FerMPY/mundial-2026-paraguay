@@ -3,26 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#07090e">
 <title>Mundial 2026 en Paraguay — Todos los partidos, todos los canales</title>
-<meta name="description" content="Guía única del Mundial 2026 para Paraguay: horarios de todos los partidos y las transmisiones en vivo de GEN, Trece, Telefuturo, Popu TV y VS Sports, reproducidas en la misma página.">
+<meta name="description" content="Guía única del Mundial 2026 para Paraguay: horarios de todos los partidos, las transmisiones en vivo de GEN, Trece, Unicanal, Popu TV y VS Sports reproducidas en la misma página, tabla de grupos y prode.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E⚽%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Asap:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <script type="module" src="/src/main.js"></script>
 </head>
 <body>
-<div class="pitch-bg" aria-hidden="true">
-  <div class="midline"></div>
-  <div class="circle"></div>
-  <div class="circle inner"></div>
-  <div class="grain"></div>
-</div>
+<!-- atmósfera: glows rojo/azul, grano y el "26" fantasma -->
+<div class="bg" aria-hidden="true"><span class="g26">26</span></div>
+<div class="tricolor" aria-hidden="true"></div>
 
 <div class="wrap">
 <header class="hide-when-watching">
-  <span class="kicker"><span class="flag-bar"><i></i><i></i><i></i></span> Fase de grupos · Junio 2026 · Hora paraguaya</span>
-  <h1>Mundial <span class="red">2026</span><br><span class="stroke">en Paraguay</span></h1>
-  <p class="sub">Todos los partidos y <strong>todos los canales que los transmiten en Paraguay</strong>, reproducidos acá mismo. Sin vueltas: elegís el partido, tocás el canal, mirás.</p>
+  <span class="kicker"><span class="flag-bar"><i></i><i></i><i></i></span> Mundial 2026 · Fase de grupos · Hora paraguaya</span>
+  <h1>Todos los partidos.<br><span class="stroke">Todos los canales.</span></h1>
+  <p class="sub">La guía del Mundial para Paraguay: elegís el partido, tocás el canal y <strong>se reproduce acá mismo</strong>. Marcadores y goleadores en vivo, tabla de grupos y prode.</p>
 </header>
 
 <!-- barra de modo cine (solo visible mientras mirás) -->
@@ -31,7 +30,7 @@
   <button class="watch-back" id="watchBack">← Volver</button>
 </div>
 
-<!-- barra "ahora en vivo / próximo partido" (saltar al partido) -->
+<!-- barra "ahora en vivo / próximo partido" -->
 <div class="now-strip hide-when-watching" id="nowStrip"></div>
 
 <!-- próximo partido de la albirroja -->
@@ -48,7 +47,7 @@
       <div class="cd-cell"><div class="cd-num" id="cdM">0</div><div class="cd-lbl">min</div></div>
       <div class="cd-cell"><div class="cd-num" id="cdS">0</div><div class="cd-lbl">seg</div></div>
     </div>
-    <div class="hero-live"><span class="live-dot" style="background:var(--rojo)"></span>¡Juega ahora!</div>
+    <div class="hero-live"><span class="live-dot"></span>¡Juega ahora!</div>
   </div>
   <div class="hero-chs" id="heroChs"></div>
 </section>
@@ -64,24 +63,25 @@
   </div>
 </section>
 
-<!-- canales -->
+<!-- señales en vivo -->
 <div class="strip-title hide-when-watching">
   <h2>Señales en vivo</h2>
-  <span class="hint">tocá un canal y se reproduce acá mismo, sin salir de la página</span>
+  <span class="hint">tocá un canal y se reproduce acá, sin salir de la página</span>
 </div>
 <div class="strip hide-when-watching" id="strip"></div>
 
-<!-- conmutador de vista: agenda / tabla -->
+<!-- conmutador de vista: agenda / tabla / prode -->
 <nav class="view-tabs hide-when-watching" id="viewTabs" aria-label="Vista">
-  <button class="vt on" data-v="agenda">Agenda de partidos</button>
-  <button class="vt" data-v="tabla">Tabla de grupos</button>
+  <button class="vt on" data-v="agenda">Agenda</button>
+  <button class="vt" data-v="tabla">Tabla</button>
+  <button class="vt" data-v="prode">Prode</button>
 </nav>
 
 <!-- vista: agenda -->
 <section id="viewAgenda" class="hide-when-watching">
   <nav class="filters" id="filters" aria-label="Filtros">
     <button class="chip on" data-f="all">Todos</button>
-    <button class="chip" data-f="live">🔴 En vivo</button>
+    <button class="chip live-chip" data-f="live">● En vivo</button>
     <button class="chip" data-f="today">Hoy</button>
     <button class="chip py-chip" data-f="py">🇵🇾 Albirroja</button>
     <button class="chip" data-f="f1">Fecha 1</button>
@@ -94,8 +94,15 @@
 
 <!-- vista: tabla de posiciones -->
 <section id="viewTable" class="hide-when-watching" hidden>
-  <p class="view-note">Se actualiza con cada partido · <span style="color:var(--verde)">verde</span> = clasifican los 2 primeros de cada grupo.</p>
+  <p class="view-note">Se actualiza con cada partido · <span class="ok">verde</span> = clasifican los 2 primeros de cada grupo.</p>
   <div class="standings" id="standings"></div>
+</section>
+
+<!-- vista: prode -->
+<section id="viewProde" class="hide-when-watching" hidden>
+  <div class="prode-head" id="prodeHead"></div>
+  <p class="view-note">Pronosticá el marcador antes de cada partido: <strong class="gold">acierto exacto +3</strong> · <strong>acertar quién gana (o empate) +1</strong>. Se cierra al comienzo del partido. Tus pronos viven en este navegador.</p>
+  <main id="prodeList"></main>
 </section>
 
 <footer class="hide-when-watching">

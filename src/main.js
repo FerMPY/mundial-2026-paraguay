@@ -3,13 +3,17 @@ import { CHANNELS, M } from './data.js'
 
 /* ---------------- cómo se reproduce cada canal ----------------
    - iframe  → el player del canal se incrusta directo (Trece)
-   - crop    → portal del canal recortado a la banda del player (GEN, Unicanal)
-   - yt      → señal en vivo del canal de YouTube (Popu, VS, si no hay video del partido)
-   Además, GEN y VS publican un VIDEO POR PARTIDO en YouTube: cuando existe (vía
-   /api/data) ese video reemplaza a la señal genérica del canal. */
+   - crop    → portal del canal recortado a la banda del player (Unicanal)
+   - yt      → señal en vivo del canal de YouTube (Popu, VS)
+   GEN y VS publican un VIDEO POR PARTIDO en YouTube: cuando existe (vía
+   /api/data) ese video reemplaza a la señal genérica del canal.
+   GEN es simple a propósito: video del partido si lo capturamos; si no,
+   tarjeta SIN SEÑAL con opciones (su player 24/7 bloquea iframes anidados
+   entre partidos y su canal de YouTube pasa sus programas, no los partidos
+   → matchOnly). */
 const httpHost = (location.protocol === 'http:' || location.protocol === 'https:') ? location.hostname : null
 const EMBEDS = {
-  gen:   { type: 'crop',   src: 'https://www.gen.com.py/',          note: 'GEN — señal en directo de su portada (recortada). Si hay video del partido, se muestra ese.' },
+  gen:   { type: 'yt', channel: 'UC9FQShRxvepLNn6lLfvBhyA', src: 'https://www.gen.com.py/', matchOnly: true, note: 'GEN — el video del partido aparece acá cerca de la hora.' },
   trece: { type: 'iframe', src: 'https://trece.com.py/en-vivo/',    note: 'Reproductor oficial de Trece. Tocá ▶ dentro del recuadro si no arranca solo.' },
   uni:   { type: 'crop',   src: 'https://unicanal.com.py/en-vivo/', note: 'Señal en vivo oficial de Unicanal. Tocá ▶ dentro del recuadro para arrancar.' },
   popu:  { type: 'yt', channel: 'UCYxENSyddnf_A9dWrYXZN6A',         note: 'Señal de Popu TV en YouTube — se ve acá cuando están transmitiendo en vivo.' },
@@ -19,7 +23,6 @@ const CH_ORDER = ['gen', 'trece', 'uni', 'popu', 'vs'] // sin Tigo (app con DRM,
 
 /* recortes de portales: banda vertical del player, en coords de página a 1100px */
 const CROPS = {
-  gen: { y: -55, ca: '1100/400', key: 'genCropY' },
   uni: { y: -250, ca: '1100/520', key: 'uniCropY' },
 }
 
@@ -45,9 +48,9 @@ function rebuildIdx() {
     if (v.teams) (videoIdx[pk(...v.teams)] ??= {})[prov] = v.url
   }
   scoreIdx = {}
-  for (const s of API.scores || []) if (s.teams) scoreIdx[pk(...s.teams)] = s
+  for (const s of API.scores || []) if (s.teams) scoreIdx[pk(s.teams[0], s.teams[1])] = s
   goalIdx = {}
-  for (const g of API.goals || []) if (g.teams) goalIdx[pk(...g.teams)] = g
+  for (const g of API.goals || []) if (g.teams) goalIdx[pk(g.teams[0], g.teams[1])] = g
 }
 // nombre lindo (de la grilla) + bandera por equipo, sacados de M
 const flagByCanon = {}, nameByCanon = {}
@@ -56,7 +59,7 @@ function rebuildTeamMaps() {
 }
 const goalsFor = m => goalIdx[pk(m.a, m.b)]?.events || []
 async function fetchData() {
-  if (!httpHost) return
+  if (!httpHost) return false
   try {
     const d = await (await fetch('/api/data')).json()
     if (d.videos) API.videos = d.videos
@@ -70,13 +73,27 @@ async function fetchData() {
     if (d.goals) API.goals = d.goals
     rebuildIdx()
     notifyGoals(prevGoals)
-    render(activeFilter); nowTick(); renderStandings()
+    render(activeFilter); nowTick(); renderStandings(); renderProde()
     if (document.body.classList.contains('watching') && thMatch) { // refrescar marcador en la barra
       const wn = document.getElementById('watchNow'); const st = matchState(thMatch)
       wn.innerHTML = `${scoreChip(st)} ${teamsHTML(thMatch)} <span class="on-ch">· ${CHANNELS[thCh].name}</span>`
     }
-  } catch { /* sin server o sin red → la agenda sigue andando sin marcadores */ }
+    return true
+  } catch { return false /* sin server o sin red → la agenda sigue andando sin marcadores */ }
 }
+/* polling con cabeza: parado con la pestaña oculta, 30s con partido en vivo,
+   90s si no (portado de la versión teletexto — menos pedidos al pedo) */
+let pollTimer = null
+async function pollTick() {
+  if (document.hidden) return
+  await fetchData()
+  const anyLive = (API.scores || []).some(s => s.status === 3) || M.some(m => matchState(m).live)
+  clearTimeout(pollTimer)
+  pollTimer = setTimeout(pollTick, anyLive ? 30_000 : 90_000)
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { clearTimeout(pollTimer); pollTick() }
+})
 const videoUrl = (m, prov) => videoIdx[pk(m.a, m.b)]?.[prov]
 // estado de un partido: {live, final, hs, as, min}
 function matchState(m) {
@@ -105,13 +122,17 @@ function addMin(d, t, mins) {
 const LIVE_MIN = 125
 
 const DOW = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO']
+const DOW3 = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
 const MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 function dayLabel(d) {
   const [Y, Mo, D] = d.split('-').map(Number)
   return `${DOW[new Date(Date.UTC(Y, Mo - 1, D)).getUTCDay()]} ${D} de ${MES[Mo - 1]}`
 }
+function dayShort(d) {
+  const [Y, Mo, D] = d.split('-').map(Number)
+  return `${DOW3[new Date(Date.UTC(Y, Mo - 1, D)).getUTCDay()]} ${D}`
+}
 const teamsHTML = m => `<span class="m-flag">${m.fa}</span>${m.a} <span class="vs">vs</span> <span class="m-flag">${m.fb}</span>${m.b}`
-const apnl = (firstName) => firstName // apellido tal cual viene de FIFA
 function scorersHTML(m) {
   const ev = goalsFor(m); if (!ev.length) return ''
   const one = e => `${e.name}${e.pen ? ' (P)' : ''}${e.og ? ' (ec)' : ''} ${e.min}`
@@ -120,17 +141,140 @@ function scorersHTML(m) {
   return `<div class="m-scorers"><span class="ball">⚽</span>${[h, a].filter(Boolean).join(' · ')}</div>`
 }
 
+/* ---------------- prode (en este navegador: localStorage, sin cuenta) ----------------
+   clave por par de equipos (pk) → sobrevive a cambios de grilla.
+   Puntos: exacto +3, acertar ganador/empate +1. Se cierra al kickoff. */
+const PRODE_KEY = 'prode26'
+let prode = {}
+try { prode = JSON.parse(localStorage.getItem(PRODE_KEY) || '{}') } catch { prode = {} }
+function savePred(k, side, val) {
+  const p = prode[k] ?? (prode[k] = {})
+  p[side] = val
+  localStorage.setItem(PRODE_KEY, JSON.stringify(prode))
+}
+const clampGoals = v => { const n = Number(v); return Number.isInteger(n) && n >= 0 ? Math.min(n, 20) : null }
+function prodePoints(ph, pa, rh, ra) {
+  if (ph === rh && pa === ra) return 3
+  return Math.sign(ph - pa) === Math.sign(rh - ra) ? 1 : 0
+}
+const isLocked = m => mKey(m) <= nowPY().key
+const slug = s => s.replace(/[^a-z0-9]+/gi, '-')
+
+function prodeTotals() {
+  let total = 0, exact = 0, scored = 0, played = 0, made = 0
+  for (const m of M) {
+    const p = prode[pk(m.a, m.b)]
+    const ph = clampGoals(p?.h), pa = clampGoals(p?.a)
+    const has = ph != null && pa != null
+    if (has) made++
+    if (!isLocked(m)) continue
+    const st = matchState(m)
+    if (st.hs == null) continue
+    played++
+    if (has && st.final) {
+      const pts = prodePoints(ph, pa, st.hs, st.as)
+      total += pts
+      if (pts === 3) exact++
+      if (pts > 0) scored++
+    }
+  }
+  return { total, exact, scored, played, made }
+}
+function renderProdeHead() {
+  const t = prodeTotals()
+  document.getElementById('prodeHead').innerHTML = `
+    <span class="ph-pts">${t.total}<small>PTS</small></span>
+    <span class="ph-stats"><b>${t.exact}</b> exactos · <b>${t.scored}</b> con puntos de <b>${t.played}</b> jugados · <b>${t.made}</b> pronos cargados</span>`
+}
+function renderProde() {
+  const list = document.getElementById('prodeList')
+  if (document.getElementById('viewProde').hidden) return
+  const now = nowPY()
+  let html = '', curDay = ''
+  for (const m of M) {
+    const k = pk(m.a, m.b)
+    const p = prode[k]
+    const ph = clampGoals(p?.h), pa = clampGoals(p?.a)
+    const has = ph != null && pa != null
+    const st = matchState(m)
+    const locked = isLocked(m)
+    if (m.d !== curDay) { curDay = m.d; html += `<div class="day-h"><span class="d">${dayLabel(m.d)}${m.d === now.date ? '</span><span class="today-tag">Hoy</span>' : '</span>'}</div>` }
+    const when = `${dayShort(m.d)} · ${m.t}`
+    if (!locked) {
+      html += `<article class="pred open" id="pred-${slug(k)}">
+        <span class="p-when">${when}</span>
+        <span class="p-teams">${teamsHTML(m)}</span>
+        <span class="p-in">
+          <input type="number" min="0" max="20" inputmode="numeric" placeholder="–" data-pk="${k}" data-side="h" value="${ph ?? ''}" aria-label="Goles ${m.a}">
+          <span class="dash">–</span>
+          <input type="number" min="0" max="20" inputmode="numeric" placeholder="–" data-pk="${k}" data-side="a" value="${pa ?? ''}" aria-label="Goles ${m.b}">
+        </span>
+        <span class="p-state" data-state="${k}">${has ? '<span class="saved">guardado ✓</span>' : 'tu prono'}</span>
+      </article>`
+      continue
+    }
+    // cerrado: resultado vs prono (+ puntos si ya terminó)
+    let res = ''
+    if (st.hs != null) {
+      let ptsTag = ''
+      if (has && st.final) {
+        const pts = prodePoints(ph, pa, st.hs, st.as)
+        ptsTag = `<span class="p-pts p${pts}">${pts > 0 ? '+' : ''}${pts} pts</span>`
+      } else if (has && st.live) {
+        ptsTag = `<span class="p-pts">en juego</span>`
+      }
+      res = `<span class="p-res">${st.live ? '<span class="live-dot"></span>' : ''}<b>${st.hs}–${st.as}</b>${has ? ` · tu prono ${ph}–${pa}` : ' · sin prono'}${ptsTag}</span>`
+    } else {
+      res = `<span class="p-res">${has ? `tu prono <b>${ph}–${pa}</b> · cerrado` : 'sin prono · cerrado'}</span>`
+    }
+    html += `<article class="pred" id="pred-${slug(k)}">
+      <span class="p-when">${when}</span>
+      <span class="p-teams">${teamsHTML(m)}</span>
+      ${res}
+    </article>`
+  }
+  list.innerHTML = html + `<p class="prode-cross">¿Querés competir contra otros? El prode con ranking y cuenta vive en <a href="https://teletexto.lakebed.app/#300" target="_blank" rel="noopener">teletexto.lakebed.app</a>.</p>`
+  renderProdeHead()
+}
+// guardar al tipear (con tope 0–20); el estado "guardado ✓" aparece al lado
+document.addEventListener('input', e => {
+  const inp = e.target.closest('.p-in input'); if (!inp) return
+  const k = inp.dataset.pk
+  const m = M.find(x => pk(x.a, x.b) === k)
+  if (m && isLocked(m)) { renderProde(); return } // se cerró mientras editabas
+  let v = clampGoals(inp.value)
+  if (inp.value !== '' && v == null) { inp.value = ''; v = null }
+  if (v != null && String(v) !== inp.value) inp.value = String(v)
+  savePred(k, inp.dataset.side, v)
+  const p = prode[k]
+  const stEl = document.querySelector(`[data-state="${CSS.escape(k)}"]`)
+  if (stEl) stEl.innerHTML = clampGoals(p?.h) != null && clampGoals(p?.a) != null ? '<span class="saved">guardado ✓</span>' : 'tu prono'
+  renderProdeHead()
+})
+// saltar desde un chip PRODE de la agenda directo a ESE partido
+function prodeJump(k) {
+  setView('prode')
+  requestAnimationFrame(() => {
+    const el = document.getElementById('pred-' + slug(k))
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.remove('hl'); void el.offsetWidth; el.classList.add('hl')
+    el.querySelector('input')?.focus({ preventScroll: true })
+  })
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-prode]')
+  if (b) prodeJump(b.dataset.prode)
+})
+
 /* ---------------- teatro ---------------- */
 const theater = document.getElementById('theater')
 const thTabs = document.getElementById('thTabs')
 const thScreen = document.getElementById('thScreen')
 const thSrcs = document.getElementById('thSrcs')
 let thCh = null, thMatch = null
+let thForce = null // pedido desde la tarjeta SIN SEÑAL: 'site' = sitio embebido, 'yt' = señal YouTube
 
-function externalCard(c, extra) {
-  return `<div class="th-msg"><span class="big">${c.name}</span><span>${extra}</span>
-          <a class="btn" href="${c.url}" target="_blank" rel="noopener">Abrir ${c.name} ↗</a></div>`
-}
 function scoreChip(st) {
   if (st.live) return `<span class="lv"><span class="live-dot"></span>En vivo</span>${st.hs != null ? `<span class="sc">${st.hs}–${st.as}</span>` : ''}${st.min ? `<span class="mn">${st.min}</span>` : ''}`
   if (st.final && st.hs != null) return `<span class="fin">Final</span><span class="sc">${st.hs}–${st.as}</span>`
@@ -143,13 +287,13 @@ function enterCinema(ch, match) {
     const st = matchState(match)
     wn.innerHTML = `${scoreChip(st)} ${teamsHTML(match)} <span class="on-ch">· ${CHANNELS[ch].name}</span>`
   } else {
-    wn.innerHTML = `Mirando <span class="vs">·</span> ${CHANNELS[ch].name}`
+    wn.innerHTML = `Mirando <span class="on-ch">· ${CHANNELS[ch].name}</span>`
   }
 }
 function exitCinema() {
   document.body.classList.remove('watching')
   theater.classList.remove('open')
-  thScreen.innerHTML = ''; thSrcs.hidden = true; thCh = thMatch = null
+  thScreen.innerHTML = ''; thSrcs.hidden = true; thCh = thMatch = null; thForce = null
   history.replaceState(null, '', location.pathname)
 }
 document.getElementById('watchBack').addEventListener('click', exitCinema)
@@ -167,26 +311,60 @@ function cropFrame(ch, src) {
 function fitCrop() { if (thScreen.classList.contains('crop')) thScreen.style.setProperty('--gs', (thScreen.clientWidth / 1100).toFixed(4)) }
 window.addEventListener('resize', fitCrop)
 const ytFrame = url => { const s = url.includes('?') ? '&' : '?'; return `<iframe src="${url}${s}autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>` }
+const plainFrame = src => `<iframe src="${src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>`
 const nudgeHtml = () => `<span class="th-nudge"><span>Ajustar recorte</span><button data-nudge="-25" title="Subir">▲</button><button data-nudge="25" title="Bajar">▼</button></span>`
+
+/* tarjeta SIN SEÑAL: antes de la hora (todos los canales de YouTube, su embed
+   "live" da un feo unavailable) y para GEN también durante el partido si no
+   capturamos su video. Botones: sitio del canal embebido / probar señal YT. */
+function noFeedCard(ch, match, st) {
+  const c = CHANNELS[ch], e = EMBEDS[ch]
+  const live = !!st?.live
+  return `<div class="th-msg">
+    <span class="nf-badge${live ? '' : ' off'}"><span class="live-dot"${live ? '' : ' style="animation:none;background:var(--mut)"'}></span>${live ? 'Sin señal acá' : 'Todavía sin señal'}</span>
+    <span class="big">${c.name}</span>
+    <span class="nf-line">${
+      live ? `El video del partido no nos llegó — miralo en el sitio de ${c.name}.`
+      : match ? `${c.name} prende su transmisión cerca de las ${match.t}. Volvé cuando arranque el partido.`
+      : `${c.name} publica el video de cada partido cerca de la hora.`}</span>
+    ${live ? `<a class="btn" href="${c.url}" target="_blank" rel="noopener">Abrir ${c.name} en vivo ↗</a>` : ''}
+    <span class="nf-row">
+      ${e.src ? `<button class="btn ghost" data-force="site">Ver el sitio de ${c.name} acá mismo</button>` : ''}
+      ${e.channel ? `<button class="btn ghost" data-force="yt">Probar señal YouTube</button>` : ''}
+    </span>
+  </div>`
+}
+thScreen.addEventListener('click', e => {
+  const b = e.target.closest('[data-force]')
+  if (b) { thForce = b.dataset.force; renderSource(thCh, thMatch) }
+})
 
 // dibuja la fuente del canal ch para el partido match (o señal genérica si no hay match)
 function renderSource(ch, match) {
   thScreen.classList.remove('crop'); thScreen.style.removeProperty('--gs')
   thSrcs.hidden = true
-  // video del partido (GEN / VS) cuando existe
+  // video del partido (GEN / VS) cuando existe — siempre gana
   if (match && (ch === 'gen' || ch === 'vs')) {
     const u = videoUrl(match, ch)
     if (u) { thScreen.innerHTML = ytFrame(u); return }
   }
   const e = EMBEDS[ch]
+  // fallbacks pedidos desde la tarjeta
+  if (thForce === 'site' && e.src) { thScreen.innerHTML = plainFrame(e.src); return }
+  if (thForce === 'yt' && e.channel) { thScreen.innerHTML = ytFrame(`https://www.youtube.com/embed/live_stream?channel=${e.channel}`); return }
+  if (e.type === 'yt') {
+    const st = match ? matchState(match) : null
+    const noFeed = match ? (!st.final && (!st.live || e.matchOnly)) : !!e.matchOnly
+    if (noFeed) { thScreen.innerHTML = noFeedCard(ch, match, st); return }
+    thScreen.innerHTML = ytFrame(`https://www.youtube.com/embed/live_stream?channel=${e.channel}`)
+    return
+  }
   if (e.type === 'crop') { cropFrame(ch, e.src); thSrcs.innerHTML = nudgeHtml(); thSrcs.hidden = false; return }
-  if (e.type === 'iframe') { thScreen.innerHTML = `<iframe src="${e.src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>`; return }
-  if (e.type === 'yt') { thScreen.innerHTML = ytFrame(`https://www.youtube.com/embed/live_stream?channel=${e.channel}`); return }
-  thScreen.innerHTML = externalCard(CHANNELS[ch], e.note)
+  thScreen.innerHTML = plainFrame(e.src)
 }
 
 function openTheater(ch, match = null, scroll = true) {
-  thCh = ch; thMatch = match
+  thCh = ch; thMatch = match; thForce = null
   history.replaceState(null, '', match ? `#m-${mKey(match)}-${ch}` : `#ch-${ch}`)
   theater.classList.add('open')
   enterCinema(ch, match)
@@ -216,7 +394,7 @@ const strip = document.getElementById('strip')
 strip.innerHTML = CH_ORDER.map(k => {
   const c = CHANNELS[k]
   return `<a class="ch-card" style="--ch-color:${c.color}" href="${c.url}" data-ch="${k}" target="_blank" rel="noopener">
-      <div class="ch-name">${c.name}</div><div class="ch-kind">${c.kind}</div><span class="ch-go">Ver en vivo</span></a>`
+      <div class="ch-name">${c.name}</div><div class="ch-kind">${c.kind}</div><span class="ch-go">Ver en vivo ▶</span></a>`
 }).join('')
 strip.addEventListener('click', e => {
   const card = e.target.closest('.ch-card'); if (!card) return
@@ -231,10 +409,12 @@ function chLinks(m) {
     return `<button class="ch-link" style="--ch-color:${c.color}" data-ch="${k}" data-mk="${mKey(m)}" title="Ver ${c.name} acá mismo"><i></i>${c.name}<span class="play">▶</span></button>`
   }).join('')
 }
+const prodeChip = m => isLocked(m) ? '' : `<button class="ch-link prode-link" data-prode="${pk(m.a, m.b)}" title="Pronosticá este partido en el prode">Prode</button>`
 const byMk = {}
 function rebuildByMk() { for (const k in byMk) delete byMk[k]; for (const m of M) byMk[mKey(m)] = m }
 rebuildByMk()
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-prode]')) return // el prode tiene su propio handler
   const b = e.target.closest('button.ch-link, button[data-ver]')
   if (b) openTheater(b.dataset.ch, byMk[b.dataset.mk] || null)
 })
@@ -263,7 +443,7 @@ function render(filter) {
         <div class="m-body">
           <div class="m-top"><span class="m-teams">${teamsHTML(m)}</span>${st.live ? '<span class="live-badge"><span class="live-dot"></span>En vivo</span>' : ''}</div>
           ${scorersHTML(m)}
-          <div class="m-chs">${chLinks(m)}</div>
+          <div class="m-chs">${chLinks(m)}${prodeChip(m)}</div>
         </div>
       </article>`)
     shown++
@@ -279,18 +459,19 @@ document.getElementById('filters').addEventListener('click', e => {
   activeFilter = b.dataset.f; render(activeFilter)
 })
 
-/* ---------------- barra "ahora / próximo" (saltar al partido) ---------------- */
+/* ---------------- barra "ahora / próximo" — accionable acá mismo ---------------- */
 const nowStrip = document.getElementById('nowStrip')
 function nowTick() {
   const now = nowPY()
   const live = M.filter(m => matchState(m).live)
   let html = ''
   if (live.length) {
-    html = `<span class="ns-label live">🔴 En vivo ahora</span>` + live.map(m => {
+    html = `<span class="ns-label live">En vivo ahora</span>` + live.map(m => {
       const st = matchState(m)
-      return `<button class="ns-card" data-ver data-ch="${m.ch.filter(c => CH_ORDER.includes(c))[0]}" data-mk="${mKey(m)}">
-        <span class="ns-teams">${m.fa} ${m.a} <b>${st.hs != null ? `${st.hs}–${st.as}` : 'vs'}</b> ${m.fb} ${m.b}</span>
-        <span class="ns-go">${st.min || ''} Ver ▶</span></button>`
+      return `<div class="ns-card is-live">
+        <span class="ns-teams"><span class="live-dot"></span> ${m.fa} ${m.a} <b>${st.hs != null ? `${st.hs}–${st.as}` : 'vs'}</b> ${m.fb} ${m.b}${st.min ? ` <span class="ns-when">${st.min}</span>` : ''}</span>
+        <span class="ns-chs">${chLinks(m)}</span>
+      </div>`
     }).join('')
   } else {
     const next = M.find(m => mKey(m) > now.key)
@@ -299,23 +480,28 @@ function nowTick() {
       let s = Math.max(0, Math.floor((t - n) / 1000)); const h = Math.floor(s / 3600); const mi = Math.floor((s % 3600) / 60)
       const inTxt = h > 0 ? `en ${h}h ${mi}m` : `en ${mi} min`
       html = `<span class="ns-label">Próximo partido</span>
-        <button class="ns-card" data-ver data-ch="${next.ch.filter(c => CH_ORDER.includes(c))[0]}" data-mk="${mKey(next)}">
+        <div class="ns-card">
           <span class="ns-teams">${next.fa} ${next.a} <b>vs</b> ${next.fb} ${next.b}</span>
-          <span class="ns-go">${next.t} · ${inTxt} ▶</span></button>`
+          <span class="ns-when">${next.t} · ${inTxt}</span>
+          <span class="ns-chs">${chLinks(next)}${prodeChip(next)}</span>
+        </div>`
     }
   }
   nowStrip.innerHTML = html
   nowStrip.style.display = html ? 'flex' : 'none'
 }
 
-/* ---------------- conmutador de vista (agenda / tabla) ---------------- */
+/* ---------------- conmutador de vista (agenda / tabla / prode) ---------------- */
 const viewAgenda = document.getElementById('viewAgenda')
 const viewTable = document.getElementById('viewTable')
+const viewProde = document.getElementById('viewProde')
 function setView(v) {
-  const tabla = v === 'tabla'
   document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === v))
-  viewTable.hidden = !tabla; viewAgenda.hidden = tabla
-  if (tabla) { renderStandings(); history.replaceState(null, '', '#tabla') }
+  viewAgenda.hidden = v !== 'agenda'
+  viewTable.hidden = v !== 'tabla'
+  viewProde.hidden = v !== 'prode'
+  if (v === 'tabla') { renderStandings(); history.replaceState(null, '', '#tabla') }
+  else if (v === 'prode') { renderProde(); history.replaceState(null, '', '#prode') }
   else history.replaceState(null, '', location.pathname)
 }
 document.getElementById('viewTabs').addEventListener('click', e => {
@@ -373,6 +559,8 @@ function toast(title, sub, match) {
 }
 
 /* ---------------- hero: próximo/actual de la albirroja ---------------- */
+const cdD = document.getElementById('cdD'), cdH = document.getElementById('cdH')
+const cdM = document.getElementById('cdM'), cdS = document.getElementById('cdS')
 function heroTick() {
   const now = nowPY()
   const hero = document.getElementById('hero')
@@ -385,7 +573,7 @@ function heroTick() {
   document.getElementById('heroLabel').textContent = live ? 'La Albirroja en cancha' : 'Próximo partido de la Albirroja'
   document.getElementById('heroMatch').innerHTML = `${m.fa} ${m.a} <span class="vs">vs</span> ${m.fb} ${m.b}`
   document.getElementById('heroWhen').textContent = `${dayLabel(m.d).charAt(0) + dayLabel(m.d).slice(1).toLowerCase()} · ${m.t} hora paraguaya`
-  document.getElementById('heroChs').innerHTML = chLinks(m)
+  document.getElementById('heroChs').innerHTML = chLinks(m) + (live ? '' : prodeChip(m))
   if (!live) {
     const target = new Date(`${m.d}T${m.t}:00`), nowLocalAsPY = new Date(`${now.key}:00`)
     let s = Math.max(0, Math.floor((target - nowLocalAsPY) / 1000))
@@ -400,12 +588,12 @@ function heroTick() {
 rebuildTeamMaps()
 render(activeFilter)
 if (location.hash === '#tabla') setView('tabla')
+else if (location.hash === '#prode') setView('prode')
 const hashM = location.hash.match(/^#m-(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})-(\w+)/)
 const hashCh = location.hash.match(/^#ch-(\w+)/)
 if (hashM && byMk[hashM[1]]) openTheater(hashM[2], byMk[hashM[1]], false)
 else if (hashCh && EMBEDS[hashCh[1]]) openTheater(hashCh[1], null, false)
-heroTick(); nowTick(); fetchData()
+heroTick(); nowTick(); pollTick()
 setInterval(heroTick, 1000)
 setInterval(nowTick, 15000)
 setInterval(() => render(activeFilter), 60000)
-setInterval(fetchData, 30000) // marcadores + videos al día
