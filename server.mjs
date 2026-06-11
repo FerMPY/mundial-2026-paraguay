@@ -77,26 +77,82 @@ async function vsVideos() {
   return out
 }
 
+const FIFA = 'https://api.fifa.com/api/v3'
+const COMP = '17', SEAS = '285023'
+const fifaGet = u => fetch(u, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) }).then(r => r.json())
+const teamNames = new Map() // IdTeam → nombre (para resolver la tabla de posiciones)
+
 let fc = { t: 0, v: null }
 async function fifaScores() {
   if (Date.now() - fc.t < 30_000 && fc.v) return fc.v
   const out = []
   try {
-    const d = await (await fetch('https://api.fifa.com/api/v3/calendar/matches?idCompetition=17&idSeason=285023&count=104&language=es', { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15_000) })).json()
+    const d = await fifaGet(`${FIFA}/calendar/matches?idCompetition=${COMP}&idSeason=${SEAS}&count=104&language=es`)
     for (const r of d.Results || []) {
       const home = (r.Home?.TeamName || [{}])[0].Description
       const away = (r.Away?.TeamName || [{}])[0].Description
       if (!home || !away) continue
+      if (r.Home?.IdTeam) teamNames.set(r.Home.IdTeam, home)
+      if (r.Away?.IdTeam) teamNames.set(r.Away.IdTeam, away)
       out.push({
         teams: [home, away],
         hs: r.HomeTeamScore, as: r.AwayTeamScore,
         status: r.MatchStatus,         // 1 = por jugarse, 3 = en vivo, otros = jugado
         min: r.MatchTime || null,
+        idMatch: r.IdMatch, idStage: r.IdStage,
       })
     }
   } catch { /* FIFA caído → sin marcadores */ }
   fc = { t: Date.now(), v: out }
   return out
+}
+
+// Tabla de posiciones (12 grupos). El nombre de equipo se resuelve por IdTeam.
+let sc = { t: 0, v: null }
+async function standings() {
+  if (Date.now() - sc.t < 60_000 && sc.v) return sc.v
+  const groups = {}
+  try {
+    const d = await fifaGet(`${FIFA}/calendar/${COMP}/${SEAS}/289273/standing?language=es`)
+    for (const r of d.Results || []) {
+      const g = (r.Group || [{}])[0].Description || '—'
+      ;(groups[g] ??= []).push({
+        team: teamNames.get(r.IdTeam) || (r.TeamName || [{}])[0]?.Description || '',
+        pos: r.Position, pts: r.Points, pj: r.Played,
+        w: r.Won, d: r.Drawn, l: r.Lost,
+        gf: r.For, ga: r.Against, gd: r.GoalsDiference,
+        q: r.QualificationStatus || null, // estado de clasificación (clasificado/eliminado)
+      })
+    }
+  } catch { /* sin tabla */ }
+  const v = Object.entries(groups).map(([group, rows]) => ({ group, rows: rows.sort((a, b) => a.pos - b.pos) }))
+  sc = { t: Date.now(), v }
+  return v
+}
+
+// Goleadores por partido: solo se piden los EN VIVO cada ciclo; los terminados
+// se piden una vez y quedan cacheados para siempre (no cambian).
+const goalCache = new Map() // idMatch → { teams, events, final }
+async function fetchGoals(s) {
+  try {
+    const m = await fifaGet(`${FIFA}/live/football/${COMP}/${SEAS}/${s.idStage}/${s.idMatch}?language=es`)
+    const events = []
+    for (const side of ['HomeTeam', 'AwayTeam']) {
+      const t = m[side] || {}
+      const names = new Map((t.Players || []).map(p => [p.IdPlayer, ((p.ShortName || p.PlayerName || [{}])[0] || {}).Description]))
+      for (const g of t.Goals || []) {
+        events.push({ side: side === 'HomeTeam' ? 'h' : 'a', name: names.get(g.IdPlayer) || '', min: g.Minute, og: g.Type === 3, pen: g.Type === 4 })
+      }
+    }
+    events.sort((a, b) => parseInt(a.min) - parseInt(b.min))
+    goalCache.set(s.idMatch, { teams: s.teams, events, final: s.status !== 1 && s.status !== 3 })
+  } catch { /* este partido no devolvió detalle ahora */ }
+}
+async function goals(scores) {
+  const live = scores.filter(s => s.status === 3)
+  const finishedNew = scores.filter(s => s.status !== 1 && s.status !== 3 && !goalCache.get(s.idMatch)?.final).slice(0, 6)
+  await Promise.all([...live, ...finishedNew].map(fetchGoals)) // vivos siempre, terminados de a 6 por ciclo
+  return [...goalCache.values()].filter(g => g.events.length).map(g => ({ teams: g.teams, events: g.events }))
 }
 
 // la agenda se lee fresca del disco: editás matches.json y la página se
@@ -112,7 +168,8 @@ async function matchesJson() {
 
 async function apiData() {
   const [gen, vs, scores, matches] = await Promise.all([genVideos(), vsVideos(), fifaScores(), matchesJson()])
-  return { videos: { gen, vs }, scores, matches, fetched: Math.floor(Date.now() / 1000) }
+  const [table, gls] = await Promise.all([standings(), goals(scores)]) // standings/goals dependen de scores
+  return { videos: { gen, vs }, scores, matches, standings: table, goals: gls, fetched: Math.floor(Date.now() / 1000) }
 }
 
 http.createServer(async (req, res) => {

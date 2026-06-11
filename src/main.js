@@ -23,9 +23,9 @@ const CROPS = {
   uni: { y: -250, ca: '1100/520', key: 'uniCropY' },
 }
 
-/* ---------------- datos en vivo (videos por partido + marcadores) ---------------- */
-const API = { videos: { gen: [], vs: [] }, scores: [] }
-let videoIdx = {}, scoreIdx = {}
+/* ---------------- datos en vivo (videos + marcadores + tabla + goleadores) ---------------- */
+const API = { videos: { gen: [], vs: [] }, scores: [], standings: [], goals: [] }
+let videoIdx = {}, scoreIdx = {}, goalIdx = {}
 function canon(name) {
   let s = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim()
   return ({
@@ -46,19 +46,31 @@ function rebuildIdx() {
   }
   scoreIdx = {}
   for (const s of API.scores || []) if (s.teams) scoreIdx[pk(...s.teams)] = s
+  goalIdx = {}
+  for (const g of API.goals || []) if (g.teams) goalIdx[pk(...g.teams)] = g
 }
+// nombre lindo (de la grilla) + bandera por equipo, sacados de M
+const flagByCanon = {}, nameByCanon = {}
+function rebuildTeamMaps() {
+  for (const m of M) { flagByCanon[canon(m.a)] = m.fa; flagByCanon[canon(m.b)] = m.fb; nameByCanon[canon(m.a)] = m.a; nameByCanon[canon(m.b)] = m.b }
+}
+const goalsFor = m => goalIdx[pk(m.a, m.b)]?.events || []
 async function fetchData() {
   if (!httpHost) return
   try {
     const d = await (await fetch('/api/data')).json()
     if (d.videos) API.videos = d.videos
     if (d.scores) API.scores = d.scores
+    if (d.standings) API.standings = d.standings
     if (Array.isArray(d.matches) && d.matches.length && JSON.stringify(d.matches) !== JSON.stringify(M)) {
       M.length = 0; M.push(...d.matches) // matches.json editado → agenda fresca sin rebuild
-      rebuildByMk()
+      rebuildByMk(); rebuildTeamMaps()
     }
+    const prevGoals = goalIdx
+    if (d.goals) API.goals = d.goals
     rebuildIdx()
-    render(activeFilter); nowTick()
+    notifyGoals(prevGoals)
+    render(activeFilter); nowTick(); renderStandings()
     if (document.body.classList.contains('watching') && thMatch) { // refrescar marcador en la barra
       const wn = document.getElementById('watchNow'); const st = matchState(thMatch)
       wn.innerHTML = `${scoreChip(st)} ${teamsHTML(thMatch)} <span class="on-ch">· ${CHANNELS[thCh].name}</span>`
@@ -99,6 +111,14 @@ function dayLabel(d) {
   return `${DOW[new Date(Date.UTC(Y, Mo - 1, D)).getUTCDay()]} ${D} de ${MES[Mo - 1]}`
 }
 const teamsHTML = m => `<span class="m-flag">${m.fa}</span>${m.a} <span class="vs">vs</span> <span class="m-flag">${m.fb}</span>${m.b}`
+const apnl = (firstName) => firstName // apellido tal cual viene de FIFA
+function scorersHTML(m) {
+  const ev = goalsFor(m); if (!ev.length) return ''
+  const one = e => `${e.name}${e.pen ? ' (P)' : ''}${e.og ? ' (ec)' : ''} ${e.min}`
+  const h = ev.filter(e => e.side === 'h').map(one).join(', ')
+  const a = ev.filter(e => e.side === 'a').map(one).join(', ')
+  return `<div class="m-scorers"><span class="ball">⚽</span>${[h, a].filter(Boolean).join(' · ')}</div>`
+}
 
 /* ---------------- teatro ---------------- */
 const theater = document.getElementById('theater')
@@ -242,6 +262,7 @@ function render(filter) {
         <div class="m-time">${st.hs != null ? `<span class="m-score">${st.hs}–${st.as}</span>` : `<span class="m-hh">${m.t}</span>`}<span class="m-tz">${st.live ? (st.min || 'EN VIVO') : st.hs != null ? 'FINAL' : 'PY'}</span></div>
         <div class="m-body">
           <div class="m-top"><span class="m-teams">${teamsHTML(m)}</span>${st.live ? '<span class="live-badge"><span class="live-dot"></span>En vivo</span>' : ''}</div>
+          ${scorersHTML(m)}
           <div class="m-chs">${chLinks(m)}</div>
         </div>
       </article>`)
@@ -287,6 +308,70 @@ function nowTick() {
   nowStrip.style.display = html ? 'flex' : 'none'
 }
 
+/* ---------------- conmutador de vista (agenda / tabla) ---------------- */
+const viewAgenda = document.getElementById('viewAgenda')
+const viewTable = document.getElementById('viewTable')
+function setView(v) {
+  const tabla = v === 'tabla'
+  document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === v))
+  viewTable.hidden = !tabla; viewAgenda.hidden = tabla
+  if (tabla) { renderStandings(); history.replaceState(null, '', '#tabla') }
+  else history.replaceState(null, '', location.pathname)
+}
+document.getElementById('viewTabs').addEventListener('click', e => {
+  const b = e.target.closest('.vt'); if (b) setView(b.dataset.v)
+})
+
+/* ---------------- tabla de posiciones ---------------- */
+const standingsEl = document.getElementById('standings')
+function teamCell(team) {
+  const c = canon(team)
+  return `${flagByCanon[c] || '🏳️'} ${nameByCanon[c] || team}`
+}
+function renderStandings() {
+  if (!API.standings.length) { standingsEl.innerHTML = ''; return }
+  standingsEl.innerHTML = API.standings.map(g => {
+    const started = g.rows.some(r => r.pj > 0) // antes del 1er partido no marcamos clasificados
+    return `
+    <div class="grp">
+      <div class="grp-h">${g.group}</div>
+      <table><thead><tr><th></th><th class="tl">Equipo</th><th>PJ</th><th>DG</th><th>Pts</th></tr></thead>
+      <tbody>${g.rows.map(r => `
+        <tr class="${started && r.pos <= 2 ? 'q' : ''}">
+          <td class="pos">${r.pos}</td><td class="tl">${teamCell(r.team)}</td>
+          <td>${r.pj}</td><td>${r.gd > 0 ? '+' + r.gd : r.gd}</td><td class="pts">${r.pts}</td>
+        </tr>`).join('')}</tbody></table>
+    </div>`
+  }).join('')
+}
+
+/* ---------------- avisos de gol (toast); no molestan en pantalla completa ---------------- */
+const toastWrap = document.getElementById('toasts')
+let goalsSeeded = false
+function notifyGoals(prev) {
+  if (!goalsSeeded) { goalsSeeded = true; return } // no avisar los goles ya existentes al abrir
+  if (document.fullscreenElement) return            // en pantalla completa, sin toasts
+  for (const m of M) {
+    const st = matchState(m); if (!st.live) continue
+    const k = pk(m.a, m.b)
+    const before = (prev[k]?.events || []).length
+    const now = goalIdx[k]?.events || []
+    for (let i = before; i < now.length; i++) {
+      const e = now[i]
+      const team = e.side === 'h' ? `${m.fa} ${m.a}` : `${m.fb} ${m.b}`
+      toast(`⚽ ¡Gol! ${team}`, `${e.name} ${e.min} · ${m.fa}${m.a} ${st.hs}–${st.as} ${m.b}${m.fb}`, m)
+    }
+  }
+}
+function toast(title, sub, match) {
+  const el = document.createElement('button')
+  el.className = 'toast'
+  el.innerHTML = `<span class="t-title">${title}</span><span class="t-sub">${sub}</span><span class="t-go">Ver ▶</span>`
+  el.onclick = () => { el.remove(); if (match) openTheater(match.ch.filter(c => CH_ORDER.includes(c))[0], match) }
+  toastWrap.appendChild(el)
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400) }, 8000)
+}
+
 /* ---------------- hero: próximo/actual de la albirroja ---------------- */
 function heroTick() {
   const now = nowPY()
@@ -312,7 +397,9 @@ function heroTick() {
   }
 }
 
+rebuildTeamMaps()
 render(activeFilter)
+if (location.hash === '#tabla') setView('tabla')
 const hashM = location.hash.match(/^#m-(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})-(\w+)/)
 const hashCh = location.hash.match(/^#ch-(\w+)/)
 if (hashM && byMk[hashM[1]]) openTheater(hashM[2], byMk[hashM[1]], false)

@@ -320,6 +320,8 @@ body.watching .watch-bar{display:flex}
   animation:pulse 1.6s ease-in-out infinite;
 }
 .live-dot{width:7px;height:7px;border-radius:50%;background:#fff;animation:blink 1.1s steps(2,start) infinite}
+.m-scorers{display:flex;gap:6px;align-items:baseline;margin-top:7px;font-size:12.5px;color:var(--ink-dim)}
+.m-scorers .ball{font-size:11px;filter:grayscale(.2)}
 .m-chs{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
 .ch-link{
   display:inline-flex;align-items:center;gap:6px;text-decoration:none;
@@ -336,6 +338,53 @@ body.watching .watch-bar{display:flex}
 .empty{
   text-align:center;color:var(--ink-faint);padding:50px 0;font-size:15px;display:none;
 }
+
+/* ---------------- conmutador de vista ---------------- */
+.view-tabs{
+  display:inline-flex;gap:4px;margin:46px 0 18px;padding:4px;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;
+}
+.view-tabs .vt{
+  border:none;cursor:pointer;background:transparent;color:var(--ink-dim);
+  font-family:"Anton",sans-serif;font-size:15px;letter-spacing:.04em;text-transform:uppercase;
+  padding:9px 18px;border-radius:9px;transition:all .15s ease;
+}
+.view-tabs .vt:hover{color:var(--ink)}
+.view-tabs .vt.on{background:var(--ink);color:#0a0e14}
+.view-note{font-size:13px;color:var(--ink-faint);margin-bottom:16px}
+
+/* ---------------- tabla de posiciones ---------------- */
+.standings{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.grp{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.grp-h{
+  font-family:"Anton",sans-serif;font-size:14px;letter-spacing:.08em;text-transform:uppercase;
+  padding:10px 14px;background:var(--card2);border-bottom:1px solid var(--line);color:var(--ink)
+}
+.grp table{width:100%;border-collapse:collapse;font-size:13px}
+.grp th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);font-weight:700;padding:7px 6px}
+.grp td{padding:7px 6px;text-align:center;border-top:1px solid var(--line);color:var(--ink-dim)}
+.grp th.tl,.grp td.tl{text-align:left;color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.grp td.pos{color:var(--ink-faint);font-variant-numeric:tabular-nums;width:22px}
+.grp td.pts{font-family:"Anton",sans-serif;font-size:15px;color:#fff}
+.grp tr.q td.pos{color:var(--verde)}
+.grp tr.q{background:linear-gradient(90deg,rgba(25,195,125,.09),transparent 60%)}
+.grp tr.q td.tl{box-shadow:inset 3px 0 0 var(--verde)}
+
+/* ---------------- avisos de gol ---------------- */
+.toasts{position:fixed;left:0;right:0;bottom:18px;z-index:120;display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none}
+.toast{
+  pointer-events:auto;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+  background:linear-gradient(120deg,#16233a,#0f1726);border:1px solid rgba(245,197,66,.4);
+  border-left:4px solid var(--gold);border-radius:12px;padding:11px 16px;min-width:280px;max-width:92vw;
+  box-shadow:0 14px 40px rgba(0,0,0,.5);font-family:"Asap",sans-serif;color:var(--ink);
+  animation:toastIn .35s cubic-bezier(.2,1.2,.3,1) both;
+}
+.toast.out{animation:toastOut .4s ease forwards}
+.toast .t-title{font-family:"Anton",sans-serif;font-size:16px;letter-spacing:.03em}
+.toast .t-sub{font-size:12.5px;color:var(--ink-dim)}
+.toast .t-go{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--verde);margin-top:3px}
+@keyframes toastIn{from{opacity:0;transform:translateY(24px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes toastOut{to{opacity:0;transform:translateY(16px)}}
 
 /* ---------------- footer ---------------- */
 footer{

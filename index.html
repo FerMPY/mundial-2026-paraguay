@@ -71,27 +71,40 @@
 </div>
 <div class="strip hide-when-watching" id="strip"></div>
 
-<!-- agenda -->
-<div class="sched-head hide-when-watching">
-  <h2>Agenda de partidos</h2>
-  <span class="hint">fase de grupos · fechas 1, 2 y 3</span>
-</div>
-<nav class="filters hide-when-watching" id="filters" aria-label="Filtros">
-  <button class="chip on" data-f="all">Todos</button>
-  <button class="chip" data-f="live">🔴 En vivo</button>
-  <button class="chip" data-f="today">Hoy</button>
-  <button class="chip py-chip" data-f="py">🇵🇾 Albirroja</button>
-  <button class="chip" data-f="f1">Fecha 1</button>
-  <button class="chip" data-f="f2">Fecha 2</button>
-  <button class="chip" data-f="f3">Fecha 3</button>
+<!-- conmutador de vista: agenda / tabla -->
+<nav class="view-tabs hide-when-watching" id="viewTabs" aria-label="Vista">
+  <button class="vt on" data-v="agenda">Agenda de partidos</button>
+  <button class="vt" data-v="tabla">Tabla de grupos</button>
 </nav>
-<main id="sched" class="hide-when-watching"></main>
-<p class="empty hide-when-watching" id="empty">No hay partidos para este filtro.</p>
+
+<!-- vista: agenda -->
+<section id="viewAgenda" class="hide-when-watching">
+  <nav class="filters" id="filters" aria-label="Filtros">
+    <button class="chip on" data-f="all">Todos</button>
+    <button class="chip" data-f="live">🔴 En vivo</button>
+    <button class="chip" data-f="today">Hoy</button>
+    <button class="chip py-chip" data-f="py">🇵🇾 Albirroja</button>
+    <button class="chip" data-f="f1">Fecha 1</button>
+    <button class="chip" data-f="f2">Fecha 2</button>
+    <button class="chip" data-f="f3">Fecha 3</button>
+  </nav>
+  <main id="sched"></main>
+  <p class="empty" id="empty">No hay partidos para este filtro.</p>
+</section>
+
+<!-- vista: tabla de posiciones -->
+<section id="viewTable" class="hide-when-watching" hidden>
+  <p class="view-note">Se actualiza con cada partido · <span style="color:var(--verde)">verde</span> = clasifican los 2 primeros de cada grupo.</p>
+  <div class="standings" id="standings"></div>
+</section>
 
 <footer class="hide-when-watching">
   <p>Marcadores y minuto en vivo vía la API pública de la FIFA; los videos por partido salen de los canales de YouTube de GEN y VS Sports. Horarios en hora de Paraguay (America/Asuncion). La grilla puede cambiar sin aviso — ante la duda, entrá igual a la señal.</p>
   <p>Fuente de la grilla: infografías de <a href="https://www.instagram.com/puntaje_ideal/" target="_blank" rel="noopener">@puntaje_ideal</a> y <a href="https://www.instagram.com/futbolenlatv/" target="_blank" rel="noopener">@futbolenlatv</a>. Esta página solo enlaza a las transmisiones oficiales de cada canal.</p>
 </footer>
 </div>
+
+<!-- avisos de gol -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>
