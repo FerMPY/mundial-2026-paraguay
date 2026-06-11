@@ -2,8 +2,7 @@ import './style.css'
 import { CHANNELS, M } from './data.js'
 
 /* ---------------- cómo se reproduce cada canal dentro de la página ----------------
-   - iframe  → la página en-vivo del canal se incrusta directo (GEN y Trece lo permiten)
-   - twitch  → simulcast oficial en Twitch (Telefuturo bloquea incrustar su propio player)
+   - iframe  → el player del canal se incrusta directo (GEN, Trece y Unicanal lo permiten)
    - yt      → transmisión en vivo del canal de YouTube (solo se ve cuando están al aire ahí)
    - external→ no se puede incrustar (app con DRM): botón para abrir afuera */
 const httpHost = (location.protocol === 'http:' || location.protocol === 'https:') ? location.hostname : null
@@ -12,8 +11,8 @@ const EMBEDS = {
     note: 'GEN transmite cada partido como video de YouTube en su portada. Si aparecen botones de partidos acá abajo, tocá el tuyo y se ve directo.' },
   trece: { type: 'iframe', src: 'https://trece.com.py/en-vivo/',
     note: 'Reproductor oficial de Trece. Si no arranca solo, tocá ▶ dentro del recuadro.' },
-  tf: { type: 'twitch', channel: 'telefuturoparaguay',
-    note: 'Telefuturo no permite incrustar su player web; esta es su señal oficial en Twitch.' },
+  uni: { type: 'iframe', src: 'https://unicanal.com.py/en-vivo/',
+    note: 'Señal en vivo oficial de Unicanal. Tocá ▶ dentro del recuadro para arrancar.' },
   popu: { type: 'yt', channel: 'UCYxENSyddnf_A9dWrYXZN6A',
     note: 'Señal de Popu TV en YouTube — se ve acá cuando están transmitiendo en vivo.' },
   vs: { type: 'yt', channel: 'UCj0RBdETcbD-mChW-ylt-sw',
@@ -52,7 +51,7 @@ const thScreen = document.getElementById('thScreen')
 const thSrcs = document.getElementById('thSrcs')
 let thCurrent = null
 
-for (const k of ['gen', 'trece', 'tf', 'popu', 'vs', 'tigo']) {
+for (const k of ['gen', 'trece', 'uni', 'popu', 'vs', 'tigo']) {
   thTabs.insertAdjacentHTML('beforeend',
     `<button class="th-tab" data-ch="${k}" style="--tc:${CHANNELS[k].color}">${CHANNELS[k].name}</button>`)
 }
@@ -92,9 +91,9 @@ function openTheater(k, scroll = true) {
   thTabs.querySelectorAll('.th-tab').forEach(t => t.classList.toggle('on', t.dataset.ch === k))
   document.getElementById('thNote').textContent = e.note
   const ext = document.getElementById('thExt'); ext.href = c.url; ext.textContent = `Abrir en el sitio de ${c.name} ↗`
-  thScreen.classList.remove('gencrop'); thScreen.style.removeProperty('--gs')
-  if (k === 'gen') {
-    genHomeFrame()
+  thScreen.classList.remove('crop'); thScreen.style.removeProperty('--gs')
+  if (e.type === 'iframe' && CROPS[k]) {
+    cropFrame(k, e.src)
     updateGenSrcs(k)
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
     return
@@ -104,10 +103,6 @@ function openTheater(k, scroll = true) {
     inner = `<iframe src="${e.src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" loading="eager"></iframe>`
   } else if (e.type === 'yt') {
     inner = `<iframe src="https://www.youtube.com/embed/live_stream?channel=${e.channel}&autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`
-  } else if (e.type === 'twitch') {
-    inner = httpHost
-      ? `<iframe src="https://player.twitch.tv/?channel=${e.channel}&parent=${httpHost}&muted=false" allow="autoplay; fullscreen" allowfullscreen></iframe>`
-      : externalCard(c, 'El player de Twitch necesita que la página se sirva por http. Mientras tanto:')
   } else {
     inner = externalCard(c, e.note)
   }
@@ -120,26 +115,39 @@ thTabs.addEventListener('click', e => {
   const t = e.target.closest('.th-tab'); if (t) openTheater(t.dataset.ch, false)
 })
 
-/* GEN ya no usa /live: cada partido es un video de YouTube en la playlist de su
-   portada. server.mjs la expone en /api/gen → un botón por partido. La portada
-   completa se muestra recortada a la banda del reproductor; como el alto del
-   header de GEN varía según el navegador, el recorte se ajusta con ▲▼. */
-const GEN_Y_KEY = 'genCropY'
-function genCropY() { return Number(localStorage.getItem(GEN_Y_KEY) ?? -55) }
-function genHomeFrame() {
-  thScreen.classList.add('gencrop')
-  thScreen.style.setProperty('--gy', genCropY())
-  thScreen.innerHTML = `<iframe src="${EMBEDS.gen.src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`
-  fitGenCrop()
+/* Recortes por canal: banda vertical del reproductor dentro del portal,
+   en coordenadas de página renderizada a 1100px. y es el corrimiento inicial
+   (ajustable con ▲▼, se guarda en localStorage); ca el aspect de la banda. */
+const CROPS = {
+  gen: { y: -55, ca: '1100/400', key: 'genCropY' },
+  uni: { y: -250, ca: '1100/520', key: 'uniCropY' },
 }
-function fitGenCrop() {
-  if (!thScreen.classList.contains('gencrop')) return
+function cropY(ch) { return Number(localStorage.getItem(CROPS[ch].key) ?? CROPS[ch].y) }
+function cropFrame(ch, src) {
+  thScreen.classList.add('crop')
+  thScreen.style.setProperty('--ca', CROPS[ch].ca)
+  thScreen.style.setProperty('--gy', cropY(ch))
+  thScreen.innerHTML = `<iframe src="${src}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`
+  fitCrop()
+}
+function fitCrop() {
+  if (!thScreen.classList.contains('crop')) return
   thScreen.style.setProperty('--gs', (thScreen.clientWidth / 1100).toFixed(4))
 }
-window.addEventListener('resize', fitGenCrop)
+window.addEventListener('resize', fitCrop)
+const genHomeFrame = () => cropFrame('gen', EMBEDS.gen.src)
+
+const nudgeHtml = () => `<span class="th-nudge"><span>Ajustar recorte</span>
+      <button data-nudge="-25" title="Subir el recorte">▲</button>
+      <button data-nudge="25" title="Bajar el recorte">▼</button></span>`
 
 let genItems = null, genAt = 0
 async function updateGenSrcs(k) {
+  if (k === 'uni') { // unicanal: solo el ajuste de recorte
+    thSrcs.innerHTML = nudgeHtml()
+    thSrcs.hidden = false
+    return
+  }
   if (k !== 'gen' || !httpHost) { thSrcs.hidden = true; return }
   try {
     if (!genItems || performance.now() - genAt > 300000) {
@@ -153,9 +161,7 @@ async function updateGenSrcs(k) {
   thSrcs.innerHTML = `<span class="lbl">Partidos GEN</span>
     <button class="th-src on" data-src="">Portada GEN</button>` +
     withSrc.map(it => `<button class="th-src" data-src="${it.sources[0].url}">${it.title}</button>`).join('') +
-    `<span class="th-nudge"><span>Ajustar recorte</span>
-      <button data-nudge="-25" title="Subir el recorte">▲</button>
-      <button data-nudge="25" title="Bajar el recorte">▼</button></span>`
+    nudgeHtml()
   thSrcs.hidden = false
   // si un partido con video está en curso (hora PY), reproducirlo directo
   const now = nowPY().key
@@ -169,15 +175,16 @@ async function updateGenSrcs(k) {
 function playGenSrc(url) {
   thSrcs.querySelectorAll('.th-src').forEach(b => b.classList.toggle('on', b.dataset.src === (url || '')))
   if (!url) { genHomeFrame(); return }
-  thScreen.classList.remove('gencrop'); thScreen.style.removeProperty('--gs')
+  thScreen.classList.remove('crop'); thScreen.style.removeProperty('--gs')
   const sep = url.includes('?') ? '&' : '?'
   thScreen.innerHTML = `<iframe src="${url}${sep}autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`
 }
 thSrcs.addEventListener('click', e => {
   const n = e.target.closest('[data-nudge]')
-  if (n) {
-    localStorage.setItem(GEN_Y_KEY, genCropY() + Number(n.dataset.nudge))
-    thScreen.style.setProperty('--gy', genCropY())
+  if (n && CROPS[thCurrent]) {
+    const c = CROPS[thCurrent]
+    localStorage.setItem(c.key, cropY(thCurrent) + Number(n.dataset.nudge))
+    thScreen.style.setProperty('--gy', cropY(thCurrent))
     return
   }
   const b = e.target.closest('.th-src')
@@ -186,7 +193,7 @@ thSrcs.addEventListener('click', e => {
 
 /* ---------------- canales (tarjetas) ---------------- */
 const strip = document.getElementById('strip')
-for (const k of ['gen', 'trece', 'tf', 'popu', 'vs', 'tigo']) {
+for (const k of ['gen', 'trece', 'uni', 'popu', 'vs', 'tigo']) {
   const c = CHANNELS[k]
   strip.insertAdjacentHTML('beforeend',
     `<a class="ch-card" style="--ch-color:${c.color}" href="${c.url}" data-ch="${k}" target="_blank" rel="noopener">
