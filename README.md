@@ -1,48 +1,94 @@
-# Mundial 2026 en Paraguay
+# Mundial 2026 en Paraguay 🇵🇾
 
-Agenda del Mundial con los canales paraguayos y reproductor en la misma página.
+Todos los partidos del Mundial 2026 con **los canales que los transmiten en
+Paraguay** (GEN, Trece, Unicanal, Popu TV, VS Sports) y un **reproductor en la
+misma página**: elegís el partido, tocás el canal, mirás. Sin saltar de sitio.
 
-## Correr
+Marcadores, minuto, goleadores y tabla de grupos en vivo (API pública de la
+FIFA). Hora de Paraguay. Hecho para hinchas, no para vender cable.
 
-Doble clic en **`Ver Mundial.command`**, o:
+## Funciona así
+
+- **Agenda por fecha** con resultado y minuto en vivo, y filtros (en vivo, hoy,
+  Albirroja, fechas).
+- **Visor por partido**: solo los canales que dan ese partido. GEN y VS abren el
+  video del partido en YouTube cuando existe; el resto, su señal en vivo.
+- **Tabla de grupos** que se actualiza con cada partido.
+- **Avisos de gol** (no molestan en pantalla completa).
+
+Más detalle y lo que viene: ver [ROADMAP.md](ROADMAP.md).
+
+## Correr local
+
+Requiere [Node.js](https://nodejs.org) 18+.
 
 ```sh
-npm install   # solo la primera vez
+npm install
 npm run build
-npm start     # → http://localhost:8642
+npm start          # → http://localhost:8642
 ```
 
-## Actualizar la agenda (octavos, cambios de grilla, etc.)
+En Mac también podés hacer doble clic en **`Ver Mundial.command`**.
 
-Editá **`matches.json`** — nada más. Si el server está corriendo, la página se
-actualiza sola en ~30 segundos (no hace falta rebuild ni reiniciar).
+> Para desarrollo con recarga en caliente del front: `npm run dev` (Vite) en una
+> terminal y `npm start` en otra; Vite proxea `/api` al server.
 
-Cada partido:
+## Actualizar la agenda
+
+Editá **`matches.json`** y listo — la página se actualiza sola en ~30 s, sin
+rebuild. Formato de cada partido y cómo agregar octavos: documentado en el mismo
+README más abajo y en [ROADMAP.md](ROADMAP.md).
 
 ```json
 {
- "d": "2026-06-29",        // fecha (hora de Paraguay)
- "t": "18:00",             // hora PY
- "a": "Paraguay",  "fa": "🇵🇾",   // equipo A + bandera
- "b": "Brasil",    "fb": "🇧🇷",   // equipo B + bandera
- "ch": ["gen", "trece"],   // canales: gen | trece | uni | popu | vs
- "f": 4,                   // fecha/ronda (1-3 = grupos; usá 4+ para octavos etc.)
- "py": 1                   // solo si juega la Albirroja (omitir si no)
+ "d": "2026-06-29", "t": "18:00",
+ "a": "Paraguay", "fa": "🇵🇾", "b": "Brasil", "fb": "🇧🇷",
+ "ch": ["gen", "trece"],
+ "f": 4,
+ "py": 1
 }
 ```
 
-Los filtros "Fecha 1/2/3" están en `index.html` (chips con `data-f`); para
-octavos agregar un chip `data-f="f4"` y su caso en `render()` de `src/main.js`.
+`ch`: `gen` · `trece` · `uni` · `popu` · `vs`. `py: 1` solo si juega Paraguay.
 
-## De dónde sale cada cosa
+## Arquitectura
 
-- **Marcadores y minuto**: API pública de FIFA (`server.mjs`, cada 30 s).
-- **Videos por partido**: GEN los publica en la playlist de su portada; VS Sports
-  en su canal de YouTube (pestaña /streams). El server los scrapea y la página
-  los enchufa al partido que corresponde por nombres de equipos.
-- **Señales en vivo**: GEN y Unicanal van recortados (crop ajustable ▲▼);
-  Trece embebe directo; Popu por YouTube.
+- **Front** (`src/`, Vite): agenda, visor, tabla, avisos. Estático tras `build`.
+- **Server** (`server.mjs`, Node sin dependencias): sirve `dist/` y expone
+  `/api/data`, que fusiona tres fuentes y cachea:
+  - **FIFA** (`api.fifa.com`) → marcadores, minuto, goleadores, tabla.
+  - **GEN** → playlist de videos por partido (scrapeada de su portada).
+  - **VS Sports** → un stream de YouTube por partido (scrapeado de su canal).
+
+El server es necesario porque el navegador no puede llamar a esas fuentes
+directo (CORS). Todo degrada con gracia: si una fuente falla, el resto sigue.
 
 ## Deploy
 
-Cualquier host Node (Railway, Render…): `npm run build && npm start`, puerto en `$PORT`.
+Necesita un host que corra Node (por el server). **Railway** anda con sólo
+conectar el repo: detecta Node, corre `npm run build` y `node server.mjs`, y
+toma el puerto de `$PORT` (ya configurado en `railway.json`).
+
+```sh
+# o por CLI:
+railway up
+```
+
+Render, Fly.io o cualquier host Node funcionan igual con `npm run build && npm start`.
+
+> GitHub Pages **no** sirve: es estático y no puede correr el server, así que
+> perdería marcadores, tabla, goleadores y los videos por partido.
+
+## Contribuir
+
+Issues y PRs bienvenidos. Ideas con más impacto en [ROADMAP.md](ROADMAP.md).
+La agenda vive en `matches.json` — corregir un canal o un horario es editar JSON.
+
+## Créditos y licencia
+
+- Grilla original: infografías de [@puntaje_ideal](https://www.instagram.com/puntaje_ideal/)
+  y [@futbolenlatv](https://www.instagram.com/futbolenlatv/).
+- Datos en vivo: API pública de la FIFA (no oficial; puede cambiar sin aviso).
+- Esta página solo enlaza a las transmisiones oficiales de cada canal.
+
+[MIT](LICENSE) · © 2026 Fernando Mendoza
