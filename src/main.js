@@ -27,7 +27,7 @@ const CROPS = {
 }
 
 /* ---------------- datos en vivo (videos + marcadores + tabla + goleadores) ---------------- */
-const API = { videos: { gen: [], vs: [] }, scores: [], standings: [], goals: [] }
+const API = { videos: { gen: [], vs: [] }, scores: [], standings: [], goals: [], prode: [] }
 let videoIdx = {}, scoreIdx = {}, goalIdx = {}
 function canon(name) {
   let s = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim()
@@ -65,6 +65,7 @@ async function fetchData() {
     if (d.videos) API.videos = d.videos
     if (d.scores) API.scores = d.scores
     if (d.standings) API.standings = d.standings
+    if (d.prode) API.prode = d.prode
     if (Array.isArray(d.matches) && d.matches.length && JSON.stringify(d.matches) !== JSON.stringify(M)) {
       M.length = 0; M.push(...d.matches) // matches.json editado → agenda fresca sin rebuild
       rebuildByMk(); rebuildTeamMaps()
@@ -159,6 +160,37 @@ function prodePoints(ph, pa, rh, ra) {
 }
 const isLocked = m => mKey(m) <= nowPY().key
 const slug = s => s.replace(/[^a-z0-9]+/gi, '-')
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+/* identidad para el ranking compartido: token aleatorio (la identidad) +
+   nombre elegido (lo que ve el ranking). Sin cuentas: vive en localStorage. */
+let ident = null
+try { ident = JSON.parse(localStorage.getItem('prodeId') || 'null') } catch { ident = null }
+function setIdentName(name) {
+  ident = { token: ident?.token || crypto.randomUUID(), name: name.replace(/\s+/g, ' ').trim().slice(0, 20) }
+  localStorage.setItem('prodeId', JSON.stringify(ident))
+}
+/* manda nombre + todos los pronos abiertos al server (debounced). El server
+   revalida el cierre por kickoff; esto solo alimenta el ranking. */
+let syncT = null, syncState = ''
+function syncProde(asap = false) {
+  if (!ident?.name || !httpHost) return
+  clearTimeout(syncT)
+  syncT = setTimeout(async () => {
+    const preds = []
+    for (const m of M) {
+      const k = pk(m.a, m.b); const p = prode[k]
+      const h = clampGoals(p?.h), a = clampGoals(p?.a)
+      if (h != null && a != null && !isLocked(m)) preds.push({ k, h, a })
+    }
+    syncState = 'sync'; renderProdeHead()
+    try {
+      const r = await fetch('/api/prode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: ident.token, name: ident.name, preds }) })
+      syncState = r.ok ? 'ok' : 'err'
+    } catch { syncState = 'err' }
+    renderProdeHead()
+  }, asap ? 50 : 1200)
+}
 
 function prodeTotals() {
   let total = 0, exact = 0, scored = 0, played = 0, made = 0
@@ -182,9 +214,48 @@ function prodeTotals() {
 }
 function renderProdeHead() {
   const t = prodeTotals()
+  const id = ident?.name
+    ? `<span class="ph-id">Jugás como <b>${esc(ident.name)}</b> <button class="ph-edit" id="prodeRename">cambiar</button>
+       <span class="ph-sync">${syncState === 'sync' ? 'subiendo…' : syncState === 'ok' ? '<span class="saved">en el ranking ✓</span>' : syncState === 'err' ? 'sin conexión al ranking' : ''}</span></span>`
+    : `<span class="ph-id"><input id="prodeName" class="ph-name" maxlength="20" placeholder="Tu nombre…" aria-label="Tu nombre para el ranking">
+       <button class="btn small" id="prodeJoin">Entrar al ranking</button></span>`
   document.getElementById('prodeHead').innerHTML = `
     <span class="ph-pts">${t.total}<small>PTS</small></span>
-    <span class="ph-stats"><b>${t.exact}</b> exactos · <b>${t.scored}</b> con puntos de <b>${t.played}</b> jugados · <b>${t.made}</b> pronos cargados</span>`
+    <span class="ph-stats"><b>${t.exact}</b> exactos · <b>${t.scored}</b> con puntos de <b>${t.played}</b> jugados · <b>${t.made}</b> pronos cargados</span>
+    ${id}`
+}
+document.getElementById('prodeHead').addEventListener('click', e => {
+  if (e.target.closest('#prodeJoin')) {
+    const name = document.getElementById('prodeName')?.value || ''
+    if (!name.trim()) { document.getElementById('prodeName')?.focus(); return }
+    setIdentName(name); syncProde(true); renderProdeHead()
+  }
+  if (e.target.closest('#prodeRename')) {
+    const prev = ident?.name || ''
+    ident = { token: ident?.token, name: '' } // mismo token: el ranking conserva tus puntos
+    renderProdeHead()
+    const inp = document.getElementById('prodeName')
+    if (inp) { inp.value = prev; inp.focus(); inp.select() }
+  }
+})
+document.getElementById('prodeHead').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'prodeName') document.getElementById('prodeJoin')?.click()
+})
+
+/* ranking compartido (viene en /api/data desde la db del server) */
+function boardHTML() {
+  const b = API.prode || []
+  if (!b.length) return ''
+  return `<div class="board">
+    <div class="board-h">Ranking</div>
+    ${b.slice(0, 30).map((e, i) => `
+      <div class="board-row${ident?.name && e.name === ident.name ? ' me' : ''}">
+        <span class="b-pos">${i + 1}</span>
+        <span class="b-name">${esc(e.name)}</span>
+        <span class="b-det">${e.exact} exactos · ${e.played} jugados</span>
+        <span class="b-pts">${e.pts} pts</span>
+      </div>`).join('')}
+  </div>`
 }
 function renderProde() {
   const list = document.getElementById('prodeList')
@@ -233,7 +304,7 @@ function renderProde() {
       ${res}
     </article>`
   }
-  list.innerHTML = html + `<p class="prode-cross">¿Querés competir contra otros? El prode con ranking y cuenta vive en <a href="https://teletexto.lakebed.app/#300" target="_blank" rel="noopener">teletexto.lakebed.app</a>.</p>`
+  list.innerHTML = boardHTML() + html + `<p class="prode-cross">Bonus: el prode también existe en versión teletexto en <a href="https://teletexto.lakebed.app/#300" target="_blank" rel="noopener">teletexto.lakebed.app</a>.</p>`
   renderProdeHead()
 }
 // guardar al tipear (con tope 0–20); el estado "guardado ✓" aparece al lado
@@ -250,6 +321,7 @@ document.addEventListener('input', e => {
   const stEl = document.querySelector(`[data-state="${CSS.escape(k)}"]`)
   if (stEl) stEl.innerHTML = clampGoals(p?.h) != null && clampGoals(p?.a) != null ? '<span class="saved">guardado ✓</span>' : 'tu prono'
   renderProdeHead()
+  syncProde()
 })
 // saltar desde un chip PRODE de la agenda directo a ESE partido
 function prodeJump(k) {
@@ -594,6 +666,7 @@ const hashCh = location.hash.match(/^#ch-(\w+)/)
 if (hashM && byMk[hashM[1]]) openTheater(hashM[2], byMk[hashM[1]], false)
 else if (hashCh && EMBEDS[hashCh[1]]) openTheater(hashCh[1], null, false)
 heroTick(); nowTick(); pollTick()
+syncProde(true) // si ya jugás con nombre, tus pronos entran al ranking al abrir
 setInterval(heroTick, 1000)
 setInterval(nowTick, 15000)
 setInterval(() => render(activeFilter), 60000)

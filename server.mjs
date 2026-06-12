@@ -12,6 +12,7 @@ import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 
 const PORT = process.env.PORT || 8642
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), 'dist')
@@ -155,6 +156,107 @@ async function goals(scores) {
   return [...goalCache.values()].filter(g => g.events.length).map(g => ({ teams: g.teams, events: g.events }))
 }
 
+/* ---------------- prode compartido (SQLite) ----------------
+   Identidad sin cuentas: el cliente genera un token aleatorio (localStorage)
+   y elige un nombre; el token es la identidad, el nombre lo que ve el ranking.
+   En Render la db vive en el disco persistente ($DB_PATH=/data/prode.db);
+   en dev cae a ./prode.db (gitignoreado). Puntos: exacto +3, ganador +1. */
+const db = new DatabaseSync(process.env.DB_PATH || join(fileURLToPath(new URL('.', import.meta.url)), 'prode.db'))
+db.exec(`
+  CREATE TABLE IF NOT EXISTS players (
+    token TEXT PRIMARY KEY,
+    name  TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS predictions (
+    token      TEXT NOT NULL,
+    match_key  TEXT NOT NULL,
+    h          INTEGER NOT NULL,
+    a          INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (token, match_key)
+  );
+`)
+const qPlayer = db.prepare(`INSERT INTO players (token, name, updated_at) VALUES (?, ?, ?)
+  ON CONFLICT(token) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`)
+const qPred = db.prepare(`INSERT INTO predictions (token, match_key, h, a, updated_at) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(token, match_key) DO UPDATE SET h = excluded.h, a = excluded.a, updated_at = excluded.updated_at`)
+const qAllPreds = db.prepare(`SELECT p.token, p.match_key, p.h, p.a, pl.name
+  FROM predictions p JOIN players pl ON pl.token = p.token`)
+
+// mismo canon()/pk() que el cliente: la clave de partido es el par de equipos
+function canon(name) {
+  let s = String(name).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim()
+  return ({
+    'ee uu': 'estados unidos', 'eeuu': 'estados unidos',
+    'islas de cabo verde': 'cabo verde',
+    'ri de iran': 'iran',
+    'republica de corea': 'corea del sur',
+    'catar': 'qatar',
+    'bosnia y herzegovina': 'bosnia',
+    'arabia saudi': 'arabia saudita',
+  })[s] || s
+}
+const pk = (a, b) => [canon(a), canon(b)].sort().join('|')
+const pyFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+function nowPYKey() {
+  const p = Object.fromEntries(pyFmt.formatToParts(new Date()).map(x => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}`
+}
+const clampGoal = v => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 20 ? n : null }
+function prodePoints(ph, pa, rh, ra) {
+  if (ph === rh && pa === ra) return 3
+  return Math.sign(ph - pa) === Math.sign(rh - ra) ? 1 : 0
+}
+
+// guarda nombre + pronos de un token; el cierre por kickoff se valida ACÁ
+// (el del cliente es solo UX) contra matches.json fresco
+async function saveProde(body) {
+  const token = String(body.token || '').slice(0, 64)
+  if (token.length < 16) return { error: 'token inválido' }
+  const name = String(body.name || '').replace(/\s+/g, ' ').trim().slice(0, 20)
+  const now = nowPYKey()
+  const matches = (await matchesJson()) || []
+  const kickoff = new Map(matches.map(m => [pk(m.a, m.b), `${m.d}T${m.t}`]))
+  const ts = Date.now()
+  qPlayer.run(token, name, ts)
+  let saved = 0, locked = 0
+  for (const p of (Array.isArray(body.preds) ? body.preds : []).slice(0, 200)) {
+    const h = clampGoal(p?.h), a = clampGoal(p?.a)
+    const ko = kickoff.get(String(p?.k || ''))
+    if (h == null || a == null || !ko) continue
+    if (ko <= now) { locked++; continue }
+    qPred.run(token, p.k, h, a, ts)
+    saved++
+  }
+  return { ok: true, saved, locked }
+}
+
+// ranking: pronos de todos contra los resultados FIFA ya cacheados
+function prodeBoard(scores) {
+  const res = new Map() // match_key → {hs, as, final}
+  for (const s of scores || []) {
+    if (!s.teams || s.hs == null) continue
+    res.set(pk(s.teams[0], s.teams[1]), { hs: s.hs, as: s.as, final: s.status !== 1 && s.status !== 3 })
+  }
+  const by = new Map() // token → entry
+  for (const r of qAllPreds.all()) {
+    const e = by.get(r.token) ?? by.set(r.token, { name: r.name || 'anónimo', pts: 0, exact: 0, hits: 0, played: 0, preds: 0 }).get(r.token)
+    e.preds++
+    const f = res.get(r.match_key)
+    if (!f || !f.final) continue
+    e.played++
+    const pts = prodePoints(r.h, r.a, f.hs, f.as)
+    e.pts += pts
+    if (pts === 3) e.exact++
+    if (pts > 0) e.hits++
+  }
+  return [...by.values()]
+    .filter(e => e.preds > 0)
+    .sort((x, y) => y.pts - x.pts || y.exact - x.exact || y.preds - x.preds)
+    .slice(0, 100)
+}
+
 // la agenda se lee fresca del disco: editás matches.json y la página se
 // actualiza sola en el próximo poll, sin rebuild ni reinicio
 let mc = { t: 0, v: null }
@@ -169,7 +271,16 @@ async function matchesJson() {
 async function apiData() {
   const [gen, vs, scores, matches] = await Promise.all([genVideos(), vsVideos(), fifaScores(), matchesJson()])
   const [table, gls] = await Promise.all([standings(), goals(scores)]) // standings/goals dependen de scores
-  return { videos: { gen, vs }, scores, matches, standings: table, goals: gls, fetched: Math.floor(Date.now() / 1000) }
+  return { videos: { gen, vs }, scores, matches, standings: table, goals: gls, prode: prodeBoard(scores), fetched: Math.floor(Date.now() / 1000) }
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let len = 0; const chunks = []
+    req.on('data', c => { len += c.length; if (len > 65536) { reject(new Error('body muy grande')); req.destroy() } else chunks.push(c) })
+    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch (e) { reject(e) } })
+    req.on('error', reject)
+  })
 }
 
 http.createServer(async (req, res) => {
@@ -180,6 +291,16 @@ http.createServer(async (req, res) => {
       res.end(JSON.stringify(await apiData()))
     } catch (e) {
       res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: String(e) }))
+    }
+    return
+  }
+  if (path.replace(/\/$/, '') === '/api/prode' && req.method === 'POST') {
+    try {
+      const out = await saveProde(await readBody(req))
+      res.writeHead(out.error ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(JSON.stringify(out))
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: String(e) }))
     }
     return
   }

@@ -333,6 +333,35 @@ h2{font:700 1rem var(--disp);text-transform:uppercase;letter-spacing:.12em;margi
 .ph-pts small{font:700 .45em var(--disp);letter-spacing:.12em;color:var(--mut);margin-left:.4em}
 .ph-stats{color:var(--mut);font-size:.92rem}
 .ph-stats b{color:var(--txt)}
+.ph-id{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;color:var(--mut);font-size:.92rem}
+.ph-id b{color:var(--oro)}
+.ph-edit{color:var(--mut);font-size:.8em;text-decoration:underline}
+.ph-edit:hover{color:var(--txt)}
+.ph-sync{font-size:.82em}
+.ph-sync .saved{color:var(--volt)}
+.ph-name{
+  width:12em;font:600 .95rem var(--body);color:var(--txt);
+  background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:99px;
+  padding:.6em 1em;
+}
+.ph-name:focus{outline:2px solid var(--oro);border-color:var(--oro)}
+.btn.small{padding:.6em 1.1em;font-size:.78rem;background:var(--oro)}
+
+/* ranking compartido */
+.board{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:8px 0;margin-bottom:18px}
+.board-h{font:700 .85rem var(--disp);letter-spacing:.12em;text-transform:uppercase;
+  color:var(--oro);padding:8px 18px}
+.board-row{display:flex;align-items:baseline;gap:14px;padding:7px 18px;
+  border-top:1px solid rgba(255,255,255,.05)}
+.board-row.me{background:rgba(255,197,61,.08)}
+.board-row.me .b-name::after{content:" · vos";color:var(--oro);font-size:.8em}
+.b-pos{min-width:1.6em;color:var(--mut);font:700 .9rem var(--disp)}
+.board-row:nth-child(2) .b-pos{color:var(--oro)}
+.b-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.b-det{color:var(--mut);font-size:.82rem}
+.b-pts{font:700 1rem var(--disp);color:var(--oro)}
+@media (max-width:640px){ .b-det{display:none} }
 .pred{
   display:flex;gap:16px;align-items:center;flex-wrap:wrap;
   background:var(--panel);border:1px solid var(--line);border-radius:var(--r);

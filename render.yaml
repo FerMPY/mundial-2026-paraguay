@@ -1,13 +1,21 @@
-# Blueprint de Render (plan free). En Render: New → Blueprint → conectar este repo.
+# Blueprint de Render. En Render: New → Blueprint → conectar este repo.
+# Plan starter + disco persistente: el prode compartido vive en SQLite en /data
+# (en el plan free el disco es efímero y la db se borraría en cada deploy).
 services:
   - type: web
     name: mundial-2026-paraguay
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run build
     startCommand: node server.mjs
     autoDeploy: true
     healthCheckPath: /
+    disk:
+      name: prode-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
-        value: "20"
+        value: "24"
+      - key: DB_PATH
+        value: /data/prode.db
